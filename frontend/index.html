@@ -10,36 +10,21 @@
 </head>
 <body>
     <div id="app-container">
-        <aside id="sidebar">
-            <div id="sidebar-header">
-                <h1>AI Assistant</h1>
-                <button id="new-chat-btn">+ New Chat</button>
-            </div>
-            <div id="chat-list">
-                <!-- Chat history items will be populated here by script.js -->
-            </div>
-        </aside>
         <main id="main-content">
-            <div id="weebo-container">
-                <div id="weebo">
-                    <div class="eye"></div>
-                    <div class="eye"></div>
-                </div>
-                <div id="greeting-bubble" class="hidden">
-                    <p id="greeting-message"></p>
-                    <div id="greeting-actions">
-                        <button id="greeting-yes">Yes</button>
-                        <button id="greeting-no">No</button>
-                    </div>
-                </div>
-            </div>
             <div id="chat-container">
-                <div id="chat-box">
-                    <!-- This is a welcome message, shown when no chat is selected or a new chat is created -->
-                    <div id="welcome-message">
-                        <h2>Your Personal AI Assistant</h2>
-                        <p>Start a new conversation by typing your message below.</p>
+                <div id="proactive-greeting" class="hidden">
+                    <p id="proactive-message"></p>
+                    <div id="proactive-actions">
+                        <button id="proactive-yes">Let's continue</button>
+                        <button id="proactive-no">Start a new chat</button>
                     </div>
+                </div>
+                <div id="welcome-message" class="hidden">
+                    <h2>Your Personal AI Assistant</h2>
+                    <p>Start a new conversation by typing your message below.</p>
+                </div>
+                <div id="chat-box">
+                    <!-- Chat messages will be appended here -->
                 </div>
                 <div id="typing-indicator" style="display: none;">
                     <div class="dot"></div>

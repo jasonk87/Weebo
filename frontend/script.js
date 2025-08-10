@@ -4,14 +4,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const userInput = document.getElementById('user-input');
     const sendButton = document.getElementById('send-button');
     const typingIndicator = document.getElementById('typing-indicator');
-    const chatList = document.getElementById('chat-list');
-    const newChatBtn = document.getElementById('new-chat-btn');
     const welcomeMessage = document.getElementById('welcome-message');
-    const weebo = document.getElementById('weebo');
-    const greetingBubble = document.getElementById('greeting-bubble');
-    const greetingMessage = document.getElementById('greeting-message');
-    const greetingYesBtn = document.getElementById('greeting-yes');
-    const greetingNoBtn = document.getElementById('greeting-no');
+    const proactiveGreeting = document.getElementById('proactive-greeting');
+    const proactiveMessage = document.getElementById('proactive-message');
+    const proactiveYesBtn = document.getElementById('proactive-yes');
+    const proactiveNoBtn = document.getElementById('proactive-no');
+
 
     // --- State ---
     let activeSessionId = null;
@@ -23,80 +21,54 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !userInput.disabled) sendMessage();
         });
-        newChatBtn.addEventListener('click', startNewChat);
 
-        greetingYesBtn.addEventListener('click', () => {
-            const sessionId = greetingYesBtn.dataset.sessionId;
+        proactiveYesBtn.addEventListener('click', () => {
+            const sessionId = proactiveYesBtn.dataset.sessionId;
             if (sessionId) {
                 switchSession(sessionId);
             }
-            greetingBubble.classList.add('hidden');
+            proactiveGreeting.classList.add('hidden');
         });
 
-        greetingNoBtn.addEventListener('click', () => {
-            greetingBubble.classList.add('hidden');
+        proactiveNoBtn.addEventListener('click', () => {
+            startNewChat();
+            proactiveGreeting.classList.add('hidden');
         });
 
-        loadSessions();
-        renderInitialUI();
         showProactiveGreeting();
     }
 
+    // --- Proactive Greeting ---
     async function showProactiveGreeting() {
         try {
             const response = await fetch(`${BACKEND_BASE_URL}/sessions/latest/greeting`);
-            if (!response.ok) return; // Fail silently
-
+            if (!response.ok) {
+                startNewChat();
+                return;
+            }
             const data = await response.json();
-            if (data.greeting) {
-                greetingMessage.textContent = data.greeting;
-                if (data.session_id) {
-                    greetingYesBtn.dataset.sessionId = data.session_id;
-                    greetingYesBtn.style.display = 'inline-block';
-                    greetingNoBtn.textContent = 'No';
-                } else {
-                    // If no session, "Yes" makes no sense. Turn it into an "Okay" button.
-                    greetingYesBtn.style.display = 'none';
-                    greetingNoBtn.textContent = 'Okay';
-                }
-                greetingBubble.classList.remove('hidden');
+            if (data.session_id) {
+                proactiveMessage.textContent = data.greeting;
+                proactiveYesBtn.dataset.sessionId = data.session_id;
+                proactiveGreeting.classList.remove('hidden');
+                welcomeMessage.classList.add('hidden');
+            } else {
+                startNewChat();
             }
         } catch (error) {
-            console.error('Error fetching proactive greeting:', error);
+            startNewChat();
         }
     }
+
 
     // --- Session Management ---
-    async function loadSessions() {
-        try {
-            const response = await fetch(`${BACKEND_BASE_URL}/sessions`);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const sessions = await response.json();
-
-            chatList.innerHTML = ''; // Clear existing list
-            sessions.forEach((session, index) => {
-                const listItem = document.createElement('div');
-                listItem.className = 'chat-list-item';
-                listItem.textContent = session.title;
-                listItem.dataset.sessionId = session.id;
-                listItem.style.animationDelay = `${index * 0.05}s`;
-                listItem.addEventListener('click', () => switchSession(session.id));
-                chatList.appendChild(listItem);
-            });
-            updateActiveSessionInUI();
-        } catch (error) {
-            console.error('Error loading sessions:', error);
-            // Optionally, display an error in the sidebar
-        }
-    }
-
     async function switchSession(sessionId) {
-        if (activeSessionId === sessionId) return;
-
         activeSessionId = sessionId;
         chatBox.innerHTML = '';
-        welcomeMessage.style.display = 'none';
-        updateActiveSessionInUI();
+        welcomeMessage.classList.add('hidden');
+        proactiveGreeting.classList.add('hidden');
+        userInput.disabled = false;
+        sendButton.disabled = false;
         userInput.focus();
 
         try {
@@ -104,7 +76,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const history = await response.json();
 
-            // Filter out system messages from history rendering
             history.filter(msg => msg.role !== 'system' && msg.role !== 'tool').forEach(message => {
                 if (message.role === 'user') {
                     appendMessage(message.content, 'user');
@@ -125,8 +96,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function startNewChat() {
         activeSessionId = crypto.randomUUID();
         chatBox.innerHTML = '';
-        welcomeMessage.style.display = 'none';
-        updateActiveSessionInUI();
+        welcomeMessage.classList.remove('hidden');
+        proactiveGreeting.classList.add('hidden');
+        userInput.disabled = false;
+        sendButton.disabled = false;
         userInput.focus();
     }
 
@@ -135,14 +108,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const messageText = userInput.value.trim();
         if (messageText === '' || !activeSessionId) return;
 
-        welcomeMessage.style.display = 'none';
+        welcomeMessage.classList.add('hidden');
+        proactiveGreeting.classList.add('hidden');
         appendMessage(messageText, 'user');
         userInput.value = '';
 
         typingIndicator.style.display = 'flex';
         sendButton.disabled = true;
         userInput.disabled = true;
-        weebo.classList.add('weebo-thinking');
 
         const botMessageElement = appendMessage('', 'bot');
         let isFirstChunk = true;
@@ -209,7 +182,6 @@ document.addEventListener('DOMContentLoaded', () => {
             sendButton.disabled = false;
             userInput.disabled = false;
             userInput.focus();
-            weebo.classList.remove('weebo-thinking');
             updateActiveSessionInUI();
         }
     };
