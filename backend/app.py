@@ -3,6 +3,7 @@ from flask_cors import CORS
 import requests
 import json
 import time
+import shelve
 from backend.knowledge_base import save_fact
 
 app = Flask(__name__)
@@ -26,10 +27,11 @@ Your thought process should be:
 Always start by thinking.
 """
 
-chat_histories = {}
 tools = {
     "save_fact": save_fact,
 }
+
+CHAT_HISTORY_DB = 'chat_histories.db'
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -40,12 +42,14 @@ def chat():
     message = data['message']
     session_id = data['session_id']
 
-    def generate():
-        history = chat_histories.get(session_id, [
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ])
-        history.append({"role": "user", "content": message})
+    def generate_and_save():
+        # 1. Read initial history from shelve
+        with shelve.open(CHAT_HISTORY_DB) as db:
+            history = db.get(session_id, [
+                {"role": "system", "content": SYSTEM_PROMPT}
+            ])
 
+        history.append({"role": "user", "content": message})
         full_assistant_response = ""
 
         try:
@@ -65,22 +69,23 @@ def chat():
                 for line in response.iter_lines():
                     if line:
                         try:
-                            chunk = json.loads(line)
+                            chunk_str = line.decode('utf-8')
+                            chunk = json.loads(chunk_str)
 
                             # Check if the chunk is a tool call
                             if chunk.get("type") == "tool_call":
                                 tool_call_json = chunk
-                                # Tool calls should be the complete response, so we can break
                                 break
 
                             # Otherwise, it's a thought or an answer chunk
-                            yield line.decode('utf-8') + '\n'
+                            yield chunk_str + '\n'
 
                             # Accumulate final answer for history
                             if chunk.get("type") == "answer_chunk":
                                 full_assistant_response += chunk.get("content", "")
 
                         except json.JSONDecodeError:
+                            print(f"JSON decode error for line: {line}")
                             continue
 
                 if tool_call_json:
@@ -110,14 +115,16 @@ def chat():
             if full_assistant_response:
                 history.append({"role": "assistant", "content": full_assistant_response})
 
-            chat_histories[session_id] = history
-
         except requests.exceptions.RequestException as e:
             error_message = f"Error connecting to Ollama: {e}"
             print(error_message)
             yield json.dumps({"type": "error", "content": error_message}) + '\n'
+        finally:
+            # After generator is exhausted, save the final history
+            with shelve.open(CHAT_HISTORY_DB) as db:
+                db[session_id] = history
 
-    return Response(generate(), mimetype='application/x-ndjson')
+    return Response(generate_and_save(), mimetype='application/x-ndjson')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

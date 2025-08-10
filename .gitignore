@@ -16,3 +16,7 @@ VENV/
 # IDEs
 .idea/
 .vscode/
+
+# Database files
+*.db
+*.db.*
