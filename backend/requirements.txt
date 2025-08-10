@@ -1,0 +1,5 @@
+Flask
+requests
+Flask-Cors
+pytest
+pytest-mock
