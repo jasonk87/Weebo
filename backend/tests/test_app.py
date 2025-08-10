@@ -184,3 +184,36 @@ def test_get_session_history_success(client, tmp_path):
     response = client.get('/sessions/session1')
     assert response.status_code == 200
     assert response.get_json() == mock_history
+
+
+def test_get_latest_session_greeting(client, tmp_path):
+    """Test the /sessions/latest/greeting endpoint."""
+    # Scenario 1: No sessions
+    response = client.get('/sessions/latest/greeting')
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert "Welcome! What can I help you with today?" in json_data['greeting']
+    assert json_data['session_id'] is None
+
+    # Manually create some session data
+    history_db_path = str(tmp_path / "chat_histories.db")
+    with shelve.open(history_db_path) as db:
+        db['session1'] = [{'role': 'user', 'content': 'Hello there'}]
+        db['session_alpha'] = [{'role': 'user', 'content': 'My Project'}] # This should be "latest" due to alphabetical sort
+
+    # Scenario 2: A session exists
+    response = client.get('/sessions/latest/greeting')
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert "continue our conversation about 'My Project'?" in json_data['greeting']
+    assert json_data['session_id'] == 'session_alpha'
+
+    # Scenario 3: Latest session has no user message (and thus no title)
+    with shelve.open(history_db_path) as db:
+        db['session_zulu'] = [{'role': 'system', 'content': 'System prompt'}] # This is now the latest
+
+    response = client.get('/sessions/latest/greeting')
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert "Ready to start a new conversation?" in json_data['greeting']
+    assert json_data['session_id'] is None

@@ -101,6 +101,64 @@ body {
     right: 15px;
 }
 
+#greeting-bubble {
+    position: absolute;
+    top: 70px; /* Position below Weebo */
+    right: 20px;
+    width: 250px;
+    background-color: #fff;
+    padding: 15px;
+    border-radius: 15px;
+    box-shadow: var(--box-shadow);
+    z-index: 20;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#greeting-bubble.hidden {
+    opacity: 0;
+    transform: translateY(-10px);
+    pointer-events: none;
+}
+
+#greeting-bubble p {
+    margin: 0 0 15px 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+#greeting-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+#greeting-actions button {
+    border: none;
+    padding: 8px 15px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+#greeting-yes {
+    background-color: var(--accent-color);
+    color: white;
+}
+#greeting-yes:hover {
+    background-color: var(--accent-hover);
+}
+
+#greeting-no {
+    background-color: #eee;
+    color: #333;
+}
+#greeting-no:hover {
+    background-color: #ddd;
+}
+
 
 /* --- Sidebar Styles --- */
 #sidebar-header {

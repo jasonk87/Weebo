@@ -8,6 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const newChatBtn = document.getElementById('new-chat-btn');
     const welcomeMessage = document.getElementById('welcome-message');
     const weebo = document.getElementById('weebo');
+    const greetingBubble = document.getElementById('greeting-bubble');
+    const greetingMessage = document.getElementById('greeting-message');
+    const greetingYesBtn = document.getElementById('greeting-yes');
+    const greetingNoBtn = document.getElementById('greeting-no');
 
     // --- State ---
     let activeSessionId = null;
@@ -21,8 +25,45 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         newChatBtn.addEventListener('click', startNewChat);
 
+        greetingYesBtn.addEventListener('click', () => {
+            const sessionId = greetingYesBtn.dataset.sessionId;
+            if (sessionId) {
+                switchSession(sessionId);
+            }
+            greetingBubble.classList.add('hidden');
+        });
+
+        greetingNoBtn.addEventListener('click', () => {
+            greetingBubble.classList.add('hidden');
+        });
+
         loadSessions();
         renderInitialUI();
+        showProactiveGreeting();
+    }
+
+    async function showProactiveGreeting() {
+        try {
+            const response = await fetch(`${BACKEND_BASE_URL}/sessions/latest/greeting`);
+            if (!response.ok) return; // Fail silently
+
+            const data = await response.json();
+            if (data.greeting) {
+                greetingMessage.textContent = data.greeting;
+                if (data.session_id) {
+                    greetingYesBtn.dataset.sessionId = data.session_id;
+                    greetingYesBtn.style.display = 'inline-block';
+                    greetingNoBtn.textContent = 'No';
+                } else {
+                    // If no session, "Yes" makes no sense. Turn it into an "Okay" button.
+                    greetingYesBtn.style.display = 'none';
+                    greetingNoBtn.textContent = 'Okay';
+                }
+                greetingBubble.classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error('Error fetching proactive greeting:', error);
+        }
     }
 
     // --- Session Management ---

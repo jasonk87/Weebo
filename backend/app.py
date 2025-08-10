@@ -160,5 +160,42 @@ def get_session_history(session_id):
         return jsonify({"error": "Could not retrieve session history"}), 500
 
 
+@app.route('/sessions/latest/greeting', methods=['GET'])
+def get_latest_session_greeting():
+    try:
+        with shelve.open(CHAT_HISTORY_DB) as db:
+            if not db:
+                return jsonify({
+                    "greeting": "Welcome! What can I help you with today?",
+                    "session_id": None
+                })
+
+            # The existing /sessions endpoint sorts keys alphabetically. We'll do the same.
+            latest_session_id = sorted(list(db.keys()))[-1]
+            history = db[latest_session_id]
+
+            first_user_message = next((msg['content'] for msg in history if msg['role'] == 'user'), 'New Conversation')
+            title = (first_user_message[:50] + '...') if len(first_user_message) > 50 else first_user_message
+
+            if title == 'New Conversation':
+                 return jsonify({
+                    "greeting": "Welcome back! Ready to start a new conversation?",
+                    "session_id": None
+                 })
+
+            greeting = f"Welcome back! Would you like to continue our conversation about '{title}'?"
+            return jsonify({
+                "greeting": greeting,
+                "session_id": latest_session_id
+            })
+    except Exception as e:
+        print(f"Error getting latest session greeting: {e}")
+        # Fallback to a generic greeting in case of any error
+        return jsonify({
+            "greeting": "Welcome back! It's great to see you.",
+            "session_id": None
+        })
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
