@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatList = document.getElementById('chat-list');
     const newChatBtn = document.getElementById('new-chat-btn');
     const welcomeMessage = document.getElementById('welcome-message');
+    const weebo = document.getElementById('weebo');
 
     // --- State ---
     let activeSessionId = null;
@@ -100,6 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         typingIndicator.style.display = 'flex';
         sendButton.disabled = true;
         userInput.disabled = true;
+        weebo.classList.add('weebo-thinking');
 
         const botMessageElement = appendMessage('', 'bot');
         let isFirstChunk = true;
@@ -166,6 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sendButton.disabled = false;
             userInput.disabled = false;
             userInput.focus();
+            weebo.classList.remove('weebo-thinking');
             updateActiveSessionInUI();
         }
     };
