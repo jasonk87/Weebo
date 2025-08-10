@@ -126,5 +126,39 @@ def chat():
 
     return Response(generate_and_save(), mimetype='application/x-ndjson')
 
+@app.route('/sessions', methods=['GET'])
+def get_sessions():
+    sessions = []
+    try:
+        with shelve.open(CHAT_HISTORY_DB) as db:
+            # Sort keys to have a consistent order, maybe by creation time if possible
+            # For now, sorting alphabetically is better than random
+            sorted_keys = sorted(list(db.keys()))
+            for session_id in sorted_keys:
+                history = db[session_id]
+                # Find the first user message to use as a title
+                first_user_message = next((msg['content'] for msg in history if msg['role'] == 'user'), None)
+                title = (first_user_message[:50] + '...') if first_user_message and len(first_user_message) > 50 else first_user_message
+                if not title:
+                    title = 'New Conversation'
+
+                sessions.append({'id': session_id, 'title': title})
+        return jsonify(sessions)
+    except Exception as e:
+        print(f"Error reading sessions: {e}")
+        return jsonify({"error": "Could not retrieve sessions"}), 500
+
+@app.route('/sessions/<session_id>', methods=['GET'])
+def get_session_history(session_id):
+    try:
+        with shelve.open(CHAT_HISTORY_DB) as db:
+            if session_id not in db:
+                return jsonify({"error": "Session not found"}), 404
+            return jsonify(db[session_id])
+    except Exception as e:
+        print(f"Error reading session {session_id}: {e}")
+        return jsonify({"error": "Could not retrieve session history"}), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

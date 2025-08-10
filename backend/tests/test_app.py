@@ -1,5 +1,6 @@
 import pytest
 import json
+import shelve
 from backend.app import app as flask_app
 
 @pytest.fixture
@@ -127,3 +128,59 @@ def test_chat_with_tool_call(client, mocker):
 
     assert lines[4]['type'] == 'answer_chunk'
     assert lines[4]['content'] == "Thanks for telling me your name, Jules!"
+
+
+def test_get_sessions_empty(client):
+    """Test the /sessions endpoint when no sessions exist."""
+    response = client.get('/sessions')
+    assert response.status_code == 200
+    assert response.get_json() == []
+
+def test_get_sessions_with_data(client, tmp_path):
+    """Test the /sessions endpoint with some data."""
+    # Manually create some session data
+    history_db_path = str(tmp_path / "chat_histories.db")
+    with shelve.open(history_db_path) as db:
+        db['session1'] = [
+            {'role': 'user', 'content': 'This is the first message.'}
+        ]
+        db['session2'] = [
+            {'role': 'user', 'content': 'This is another conversation that is much longer than fifty characters to test truncation.'}
+        ]
+        db['session3'] = [
+            # No user message
+            {'role': 'system', 'content': '...'}
+        ]
+
+    response = client.get('/sessions')
+    assert response.status_code == 200
+    sessions = response.get_json()
+    assert len(sessions) == 3
+
+    # The sessions should be sorted by id
+    assert sessions[0]['id'] == 'session1'
+    assert sessions[0]['title'] == 'This is the first message.'
+
+    assert sessions[1]['id'] == 'session2'
+    assert sessions[1]['title'] == 'This is another conversation that is much longer t...'
+
+    assert sessions[2]['id'] == 'session3'
+    assert sessions[2]['title'] == 'New Conversation'
+
+
+def test_get_session_history_not_found(client):
+    """Test getting history for a session that does not exist."""
+    response = client.get('/sessions/non-existent-session')
+    assert response.status_code == 404
+    assert response.get_json()['error'] == 'Session not found'
+
+def test_get_session_history_success(client, tmp_path):
+    """Test getting history for a session that exists."""
+    history_db_path = str(tmp_path / "chat_histories.db")
+    mock_history = [{'role': 'user', 'content': 'Hello'}]
+    with shelve.open(history_db_path) as db:
+        db['session1'] = mock_history
+
+    response = client.get('/sessions/session1')
+    assert response.status_code == 200
+    assert response.get_json() == mock_history
