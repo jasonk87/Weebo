@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const typingIndicator = document.getElementById('typing-indicator');
 
     const BACKEND_URL = 'http://localhost:5000/chat';
+    const sessionId = crypto.randomUUID();
 
     const sendMessage = async () => {
         const messageText = userInput.value.trim();
@@ -26,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ message: messageText }),
+                body: JSON.stringify({ message: messageText, session_id: sessionId }),
             });
 
             if (!response.body) {
