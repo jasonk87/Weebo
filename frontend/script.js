@@ -18,6 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
         sendButton.disabled = true;
         userInput.disabled = true;
 
+        const botMessageElement = appendMessage('', 'bot');
+
         try {
             const response = await fetch(BACKEND_URL, {
                 method: 'POST',
@@ -33,21 +35,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            let botMessageElement = null;
             let buffer = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                // Hide typing indicator once the first chunk arrives
-                if (typingIndicator.style.display !== 'none') {
-                    typingIndicator.style.display = 'none';
-                }
-
-                if (!botMessageElement) {
-                    botMessageElement = appendMessage('', 'bot');
-                }
+                const wasScrolledToBottom = isScrolledToBottom(chatBox);
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
@@ -58,32 +52,48 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (line.trim() === '') continue;
                     try {
                         const jsonChunk = JSON.parse(line);
-                        if (jsonChunk.error) {
-                            botMessageElement.textContent = `Error: ${jsonChunk.error}`;
+
+                        // Hide typing indicator on first chunk
+                        if (typingIndicator.style.display !== 'none') {
+                            typingIndicator.style.display = 'none';
+                        }
+
+                        if (jsonChunk.type === 'thought') {
+                            const thoughtsContent = botMessageElement.thoughtsContent;
+                            const thoughtScrolledToBottom = isScrolledToBottom(thoughtsContent);
+
+                            botMessageElement.thoughtsContainer.style.display = 'block';
+                            const thoughtElement = document.createElement('p');
+                            thoughtElement.textContent = jsonChunk.content;
+                            thoughtsContent.appendChild(thoughtElement);
+
+                            if (thoughtScrolledToBottom) {
+                                thoughtsContent.scrollTop = thoughtsContent.scrollHeight;
+                            }
+                        } else if (jsonChunk.type === 'answer_chunk') {
+                            botMessageElement.fullContent += jsonChunk.content;
+                            botMessageElement.answerContainer.innerHTML = marked.parse(botMessageElement.fullContent);
+                            botMessageElement.answerContainer.querySelectorAll('pre code').forEach((block) => {
+                                hljs.highlightElement(block);
+                            });
+                            addCopyButtons(botMessageElement.answerContainer);
+                        } else if (jsonChunk.type === 'error') {
+                            botMessageElement.answerContainer.innerHTML = `<p class="error">Error: ${jsonChunk.content}</p>`;
                             return;
                         }
 
-                        // Assuming the streaming chunk has a 'message' object with 'content'
-                        if (jsonChunk.message && jsonChunk.message.content) {
-                            botMessageElement.fullContent += jsonChunk.message.content;
-                            // Use marked to parse markdown content
-                            botMessageElement.innerHTML = marked.parse(botMessageElement.fullContent);
-                            // Apply highlighting to code blocks
-                            botMessageElement.querySelectorAll('pre code').forEach((block) => {
-                                hljs.highlightElement(block);
-                            });
-                            addCopyButtons(botMessageElement);
-                            chatBox.scrollTop = chatBox.scrollHeight;
-                        }
                     } catch (error) {
                         console.error('Error parsing JSON chunk:', error, 'Chunk:', line);
                     }
                 }
+
+                if (wasScrolledToBottom) {
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            const botMessageElement = appendMessage('', 'bot');
-            botMessageElement.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            botMessageElement.answerContainer.innerHTML = `<p class="error">Error: ${error.message}</p>`;
         } finally {
             // Re-enable input and hide indicator
             typingIndicator.style.display = 'none';
@@ -92,6 +102,12 @@ document.addEventListener('DOMContentLoaded', () => {
             userInput.focus();
         }
     };
+
+    const isScrolledToBottom = (element) => {
+        // A little buffer for pixel-perfect scrolling issues
+        const buffer = 10;
+        return element.scrollHeight - element.scrollTop <= element.clientHeight + buffer;
+    }
 
     const addCopyButtons = (element) => {
         const codeBlocks = element.querySelectorAll('pre');
@@ -124,8 +140,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sender === 'user') {
             messageElement.textContent = text;
         } else {
-            messageElement.fullContent = text; // Custom property to store raw content
-            messageElement.innerHTML = text;
+            // Create the new structure for bot messages
+            messageElement.innerHTML = `
+                <div class="thoughts-container" style="display: none;">
+                    <div class="thoughts-header">Thinking...</div>
+                    <div class="thoughts-content"></div>
+                </div>
+                <div class="answer-container"></div>
+            `;
+            messageElement.answerContainer = messageElement.querySelector('.answer-container');
+            messageElement.thoughtsContainer = messageElement.querySelector('.thoughts-container');
+            messageElement.thoughtsContent = messageElement.querySelector('.thoughts-content');
+            messageElement.fullContent = ''; // To store the raw answer markdown
         }
 
         chatBox.appendChild(messageElement);
