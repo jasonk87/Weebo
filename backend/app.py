@@ -1,13 +1,35 @@
-from flask import Flask, request, Response, jsonify
+from flask import Flask, request, Response, jsonify, g
 from flask_cors import CORS
 import requests
 import json
-import time
-import shelve
-from backend.knowledge_base import save_fact
+import sqlite3
+import backend.database as db
 
 app = Flask(__name__)
 CORS(app)
+
+# --- Database Connection Management ---
+def get_db():
+    """Opens a new database connection if there is none yet for the current application context."""
+    if 'db' not in g:
+        db_path = app.config.get('DATABASE_PATH', db.DB_FILE)
+        g.db = sqlite3.connect(db_path)
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+@app.teardown_appcontext
+def close_db(exception):
+    """Closes the database again at the end of the request."""
+    database = g.pop('db', None)
+    if database is not None:
+        database.close()
+
+# Initialize the database
+with app.app_context():
+    db.init_db()
+    # In a real app, this would come from a login/session management system
+    DEFAULT_USER_ID = db.get_or_create_user(get_db(), "default_user")
+# -----------------------------
 
 OLLAMA_API_URL = "http://192.168.86.30:11434/api/chat"
 OLLAMA_MODEL = "qwen3:8b"
@@ -27,11 +49,10 @@ Your thought process should be:
 Always start by thinking.
 """
 
-tools = {
-    "save_fact": save_fact,
-}
-
-CHAT_HISTORY_DB = 'chat_histories.db'
+def get_tools(db_conn):
+    return {
+        "save_fact": lambda **kwargs: db.save_fact(db_conn, **kwargs),
+    }
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -41,29 +62,25 @@ def chat():
 
     message = data['message']
     session_id = data['session_id']
+    user_id = DEFAULT_USER_ID
+
+    db_conn = get_db()
 
     def generate_and_save():
-        # 1. Read initial history from shelve
-        with shelve.open(CHAT_HISTORY_DB) as db:
-            history = db.get(session_id, [
-                {"role": "system", "content": SYSTEM_PROMPT}
-            ])
+        db.create_chat_session(db_conn, session_id, user_id)
+        db.add_chat_message(db_conn, session_id, "user", message)
 
-        history.append({"role": "user", "content": message})
+        history = db.get_session_history(db_conn, session_id)
+        history.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+
         full_assistant_response = ""
+        tools = get_tools(db_conn)
 
         try:
-            # ReAct Loop
             while True:
-                payload = {
-                    "model": OLLAMA_MODEL,
-                    "messages": history,
-                    "stream": True
-                }
-
+                payload = {"model": OLLAMA_MODEL, "messages": history, "stream": True}
                 response = requests.post(OLLAMA_API_URL, json=payload, stream=True)
                 response.raise_for_status()
-
                 tool_call_json = None
 
                 for line in response.iter_lines():
@@ -71,131 +88,84 @@ def chat():
                         try:
                             chunk_str = line.decode('utf-8')
                             chunk = json.loads(chunk_str)
-
-                            # Check if the chunk is a tool call
                             if chunk.get("type") == "tool_call":
                                 tool_call_json = chunk
                                 break
-
-                            # Otherwise, it's a thought or an answer chunk
                             yield chunk_str + '\n'
-
-                            # Accumulate final answer for history
                             if chunk.get("type") == "answer_chunk":
                                 full_assistant_response += chunk.get("content", "")
-
                         except json.JSONDecodeError:
                             print(f"JSON decode error for line: {line}")
                             continue
 
                 if tool_call_json:
                     tool_name = tool_call_json.get("tool_name")
-                    arguments = tool_call_json.get("arguments")
-
+                    arguments = tool_call_json.get("arguments", {})
                     if tool_name in tools:
                         yield json.dumps({"type": "thought", "content": f"Executing tool: {tool_name}({arguments})"}) + '\n'
                         try:
-                            tool_result = tools[tool_name](**arguments)
+                            tool_result = tools[tool_name](user_id=user_id, **arguments)
                             result_message = f"Tool {tool_name} executed successfully. Result: {tool_result}"
                         except Exception as e:
                             result_message = f"Error executing tool {tool_name}: {e}"
-
                         yield json.dumps({"type": "thought", "content": result_message}) + '\n'
-                        history.append({"role": "assistant", "content": json.dumps(tool_call_json)}) # Add tool call to history
-                        history.append({"role": "tool", "content": result_message}) # Add tool result to history
-                        continue # Continue the loop to get the next step from the AI
+                        db.add_chat_message(db_conn, session_id, "assistant", json.dumps(tool_call_json))
+                        db.add_chat_message(db_conn, session_id, "tool", result_message)
+                        history.append({"role": "assistant", "content": json.dumps(tool_call_json)})
+                        history.append({"role": "tool", "content": result_message})
+                        continue
                     else:
                         yield json.dumps({"type": "error", "content": f"Unknown tool: {tool_name}"}) + '\n'
-                        break # Exit loop if tool is unknown
+                        break
                 else:
-                    # If no tool call, the stream is finished
                     break
 
-            # Save the final assistant response to the history
             if full_assistant_response:
-                history.append({"role": "assistant", "content": full_assistant_response})
+                db.add_chat_message(db_conn, session_id, "assistant", full_assistant_response)
 
         except requests.exceptions.RequestException as e:
             error_message = f"Error connecting to Ollama: {e}"
             print(error_message)
             yield json.dumps({"type": "error", "content": error_message}) + '\n'
-        finally:
-            # After generator is exhausted, save the final history
-            with shelve.open(CHAT_HISTORY_DB) as db:
-                db[session_id] = history
 
     return Response(generate_and_save(), mimetype='application/x-ndjson')
 
 @app.route('/sessions', methods=['GET'])
 def get_sessions():
-    sessions = []
+    user_id = DEFAULT_USER_ID
     try:
-        with shelve.open(CHAT_HISTORY_DB) as db:
-            # Sort keys to have a consistent order, maybe by creation time if possible
-            # For now, sorting alphabetically is better than random
-            sorted_keys = sorted(list(db.keys()))
-            for session_id in sorted_keys:
-                history = db[session_id]
-                # Find the first user message to use as a title
-                first_user_message = next((msg['content'] for msg in history if msg['role'] == 'user'), None)
-                title = (first_user_message[:50] + '...') if first_user_message and len(first_user_message) > 50 else first_user_message
-                if not title:
-                    title = 'New Conversation'
-
-                sessions.append({'id': session_id, 'title': title})
+        sessions = db.get_all_sessions(get_db(), user_id)
         return jsonify(sessions)
     except Exception as e:
         print(f"Error reading sessions: {e}")
         return jsonify({"error": "Could not retrieve sessions"}), 500
 
 @app.route('/sessions/<session_id>', methods=['GET'])
-def get_session_history(session_id):
+def get_session_history_route(session_id):
     try:
-        with shelve.open(CHAT_HISTORY_DB) as db:
-            if session_id not in db:
-                return jsonify({"error": "Session not found"}), 404
-            return jsonify(db[session_id])
+        history = db.get_session_history(get_db(), session_id)
+        return jsonify(history)
     except Exception as e:
         print(f"Error reading session {session_id}: {e}")
         return jsonify({"error": "Could not retrieve session history"}), 500
 
-
 @app.route('/sessions/latest/greeting', methods=['GET'])
 def get_latest_session_greeting():
+    user_id = DEFAULT_USER_ID
     try:
-        with shelve.open(CHAT_HISTORY_DB) as db:
-            if not db:
-                return jsonify({
-                    "greeting": "Welcome! What can I help you with today?",
-                    "session_id": None
-                })
+        session = db.get_latest_session(get_db(), user_id)
+        if not session:
+            return jsonify({"greeting": "Welcome! What can I help you with today?", "session_id": None})
 
-            # The existing /sessions endpoint sorts keys alphabetically. We'll do the same.
-            latest_session_id = sorted(list(db.keys()))[-1]
-            history = db[latest_session_id]
+        title = session['title']
+        if title == 'New Conversation':
+             return jsonify({"greeting": "Welcome back! Ready to start a new conversation?", "session_id": None})
 
-            first_user_message = next((msg['content'] for msg in history if msg['role'] == 'user'), 'New Conversation')
-            title = (first_user_message[:50] + '...') if len(first_user_message) > 50 else first_user_message
-
-            if title == 'New Conversation':
-                 return jsonify({
-                    "greeting": "Welcome back! Ready to start a new conversation?",
-                    "session_id": None
-                 })
-
-            greeting = f"Welcome back! Would you like to continue our conversation about '{title}'?"
-            return jsonify({
-                "greeting": greeting,
-                "session_id": latest_session_id
-            })
+        greeting = f"Welcome back! Would you like to continue our conversation about '{title}'?"
+        return jsonify({"greeting": greeting, "session_id": session['id']})
     except Exception as e:
         print(f"Error getting latest session greeting: {e}")
-        # Fallback to a generic greeting in case of any error
-        return jsonify({
-            "greeting": "Welcome back! It's great to see you.",
-            "session_id": None
-        })
-
+        return jsonify({"greeting": "Welcome back! It's great to see you.", "session_id": None})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
