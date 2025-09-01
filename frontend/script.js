@@ -9,17 +9,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const proactiveMessage = document.getElementById('proactive-message');
     const proactiveYesBtn = document.getElementById('proactive-yes');
     const proactiveNoBtn = document.getElementById('proactive-no');
+    const sessionList = document.getElementById('session-list');
+    const newChatButton = document.getElementById('new-chat-button');
 
+
+    // --- Configuration ---
+    // Change this to the URL of your backend server
+    const BACKEND_BASE_URL = 'http://localhost:5000';
 
     // --- State ---
     let activeSessionId = null;
-    const BACKEND_BASE_URL = 'http://localhost:5000';
 
     // --- Main Initialization ---
     function init() {
         sendButton.addEventListener('click', sendMessage);
         userInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !userInput.disabled) sendMessage();
+        });
+
+        newChatButton.addEventListener('click', () => {
+            startNewChat();
         });
 
         proactiveYesBtn.addEventListener('click', () => {
@@ -35,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
             proactiveGreeting.classList.add('hidden');
         });
 
+        loadSessions();
         showProactiveGreeting();
     }
 
@@ -56,13 +66,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 startNewChat();
             }
         } catch (error) {
+            console.error('Error fetching greeting:', error);
             startNewChat();
         }
     }
 
 
     // --- Session Management ---
+    async function loadSessions() {
+        try {
+            const response = await fetch(`${BACKEND_BASE_URL}/sessions`);
+            if (!response.ok) throw new Error('Failed to load sessions');
+            const sessions = await response.json();
+
+            sessionList.innerHTML = '';
+            sessions.forEach(session => {
+                const li = document.createElement('li');
+                li.textContent = session.title || 'New Conversation';
+                li.dataset.sessionId = session.id;
+                li.classList.add('session-list-item');
+                li.addEventListener('click', () => switchSession(session.id));
+                sessionList.appendChild(li);
+            });
+            updateActiveSessionInUI();
+        } catch (error) {
+            console.error('Error loading sessions:', error);
+            sessionList.innerHTML = `<li class="error">Could not load sessions.</li>`;
+        }
+    }
+
     async function switchSession(sessionId) {
+        if (activeSessionId === sessionId) return;
+
         activeSessionId = sessionId;
         chatBox.innerHTML = '';
         welcomeMessage.classList.add('hidden');
@@ -70,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.disabled = false;
         sendButton.disabled = false;
         userInput.focus();
+        updateActiveSessionInUI();
 
         try {
             const response = await fetch(`${BACKEND_BASE_URL}/sessions/${sessionId}`);
@@ -101,6 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.disabled = false;
         sendButton.disabled = false;
         userInput.focus();
+        updateActiveSessionInUI();
     }
 
     // --- Chat Logic ---
@@ -211,17 +248,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- UI Helpers ---
-    function renderInitialUI() {
-        activeSessionId = null;
-        chatBox.innerHTML = '';
-        welcomeMessage.style.display = 'flex';
-        userInput.disabled = true;
-        sendButton.disabled = true;
-        updateActiveSessionInUI();
-    }
-
     function updateActiveSessionInUI() {
-        const listItems = chatList.querySelectorAll('.chat-list-item');
+        const listItems = sessionList.querySelectorAll('.session-list-item');
         listItems.forEach(item => {
             item.classList.toggle('active', item.dataset.sessionId === activeSessionId);
         });

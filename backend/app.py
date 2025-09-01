@@ -3,6 +3,7 @@ from flask_cors import CORS
 import requests
 import json
 import sqlite3
+import os
 import backend.database as db
 
 app = Flask(__name__)
@@ -24,23 +25,20 @@ def close_db(exception):
     if database is not None:
         database.close()
 
-# Initialize the database
-with app.app_context():
-    db.init_db()
-    # In a real app, this would come from a login/session management system
-    DEFAULT_USER_ID = db.get_or_create_user(get_db(), "default_user")
-# -----------------------------
+# This will be initialized in the main block or test fixture
+DEFAULT_USER_ID = 1
 
-OLLAMA_API_URL = "http://192.168.86.30:11434/api/chat"
-OLLAMA_MODEL = "qwen3:8b"
+# --- AI Configuration ---
+OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
 SYSTEM_PROMPT = """You are a helpful and friendly AI assistant. Your goal is to have a conversation with the user and assist them with their tasks.
 
 You have access to the following tools. To use a tool, you must respond with a single JSON object with 'type': 'tool_call' and no other text.
 Example:
-{"type": "tool_call", "tool_name": "save_fact", "arguments": {"fact_name": "user_hometown", "fact_content": "New York"}}
+{"type": "tool_call", "tool_name": "save_fact", "arguments": {"fact_key": "user_hometown", "fact_value": "New York"}}
 
 Here are the available tools:
-- `save_fact(fact_name: str, fact_content: str)`: Use this tool to remember a specific fact about the user or the conversation. For example, if the user mentions their name or hometown, you should save it.
+- `save_fact(fact_key: str, fact_value: str)`: Use this tool to remember a specific fact about the user or the conversation. For example, if the user mentions their name or hometown, you should save it.
 
 Your thought process should be:
 1.  **Think:** Analyze the user's message and the conversation history. Formulate a plan. You must output your thoughts in JSON format: {"type": "thought", "content": "your thought here"}.
@@ -62,7 +60,7 @@ def chat():
 
     message = data['message']
     session_id = data['session_id']
-    user_id = DEFAULT_USER_ID
+    user_id = app.config.get('DEFAULT_USER_ID', 1)
 
     db_conn = get_db()
 
@@ -132,7 +130,7 @@ def chat():
 
 @app.route('/sessions', methods=['GET'])
 def get_sessions():
-    user_id = DEFAULT_USER_ID
+    user_id = app.config.get('DEFAULT_USER_ID', 1)
     try:
         sessions = db.get_all_sessions(get_db(), user_id)
         return jsonify(sessions)
@@ -151,7 +149,7 @@ def get_session_history_route(session_id):
 
 @app.route('/sessions/latest/greeting', methods=['GET'])
 def get_latest_session_greeting():
-    user_id = DEFAULT_USER_ID
+    user_id = app.config.get('DEFAULT_USER_ID', 1)
     try:
         session = db.get_latest_session(get_db(), user_id)
         if not session:
@@ -168,4 +166,7 @@ def get_latest_session_greeting():
         return jsonify({"greeting": "Welcome back! It's great to see you.", "session_id": None})
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.init_db()
+        app.config['DEFAULT_USER_ID'] = db.get_or_create_user(get_db(), "default_user")
     app.run(host='0.0.0.0', port=5000, debug=True)
