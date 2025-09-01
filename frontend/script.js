@@ -172,13 +172,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const renameBtn = document.createElement('button');
                 renameBtn.className = 'rename-btn';
-                renameBtn.textContent = '✏️';
+                renameBtn.title = 'Rename';
+                renameBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-edit-2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>`;
                 renameBtn.addEventListener('click', (e) => { e.stopPropagation(); handleRename(session.id, li); });
                 actionsDiv.appendChild(renameBtn);
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'delete-btn';
-                deleteBtn.textContent = '🗑️';
+                deleteBtn.title = 'Delete';
+                deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`;
                 deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); handleDelete(session.id); });
                 actionsDiv.appendChild(deleteBtn);
 
@@ -295,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
 
                         if (jsonChunk.type === 'thought') {
-                            botMessageElement.thoughtsContainer.style.display = 'block';
+                            botMessageElement.thoughtsContainer.classList.add('visible');
                             botMessageElement.thoughtsContent.textContent += jsonChunk.content + '\n';
                             // Auto-scroll the thoughts container
                             const thoughtsContainer = botMessageElement.querySelector('.thoughts-content');
@@ -335,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
             messageElement.textContent = text;
         } else {
             messageElement.innerHTML = `
-                <div class="thoughts-container" style="display: none;">
+                <div class="thoughts-container">
                     <div class="thoughts-header">Thinking...</div>
                     <div class="thoughts-content">
                         <pre><code></code></pre>

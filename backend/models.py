@@ -1,4 +1,4 @@
-from backend.app import db_sql_alchemy as db
+from .app import db_sql_alchemy as db
 from datetime import datetime, UTC
 
 class User(db.Model):

@@ -1,5 +1,5 @@
-from backend.app import db_sql_alchemy as db
-from backend.models import User, ChatSession, ChatMessage, UserFact
+from .app import db_sql_alchemy as db
+from .models import User, ChatSession, ChatMessage, UserFact
 from sqlalchemy import desc
 
 def init_db():

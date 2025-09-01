@@ -17,8 +17,8 @@ app.config['DEFAULT_USER_ID'] = 1 # Default user_id, will be set properly on sta
 db_sql_alchemy = SQLAlchemy(app)
 
 # Import models after db is created to avoid circular imports
-from backend.models import User, ChatSession, ChatMessage, UserFact
-import backend.database as db_ops
+from .models import User, ChatSession, ChatMessage, UserFact
+from . import database as db_ops
 
 # --- AI Configuration ---
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
