@@ -11,16 +11,15 @@ CORS(app)
 
 # --- Database Connection Management ---
 def get_db():
-    """Opens a new database connection if there is none yet for the current application context."""
-    if 'db' not in g:
-        db_path = app.config.get('DATABASE_PATH', db.DB_FILE)
-        g.db = sqlite3.connect(db_path)
-        g.db.row_factory = sqlite3.Row
-    return g.db
+    """(Temporary diagnostic version) Opens a new database connection every time."""
+    db_path = app.config.get('DATABASE_PATH', db.DB_FILE)
+    db_conn = sqlite3.connect(db_path)
+    db_conn.row_factory = sqlite3.Row
+    return db_conn
 
-@app.teardown_appcontext
+# @app.teardown_appcontext
 def close_db(exception):
-    """Closes the database again at the end of the request."""
+    """(Temporarily disabled) Closes the database again at the end of the request."""
     database = g.pop('db', None)
     if database is not None:
         database.close()
