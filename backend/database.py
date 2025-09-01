@@ -1,185 +1,101 @@
-import sqlite3
-import os
+from backend.app import db_sql_alchemy as db
+from backend.models import User, ChatSession, ChatMessage, UserFact
+from sqlalchemy import desc
 
-DB_FILE = "ai_assistant.db"
-
-def init_db(db_path=DB_FILE):
+def init_db():
     """Initializes the database and creates tables if they don't exist."""
-    # This check is important for testing, where we might re-initialize often.
-    # For production, this function would typically run only once.
-    db_is_new = not os.path.exists(db_path)
+    db.create_all()
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    if db_is_new:
-        cursor = conn.cursor()
-
-        # Users Table
-        cursor.execute("""
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-
-        # Chat Sessions Table
-        cursor.execute("""
-        CREATE TABLE chat_sessions (
-            id TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            title TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-        """)
-
-        # Chat Messages Table
-        cursor.execute("""
-        CREATE TABLE chat_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (session_id) REFERENCES chat_sessions (id)
-        )
-        """)
-
-        # User Facts Table (for RAG)
-        cursor.execute("""
-        CREATE TABLE user_facts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            fact_key TEXT NOT NULL,
-            fact_value TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            UNIQUE(user_id, fact_key)
-        )
-        """)
-
-        conn.commit()
-        print(f"Database '{db_path}' initialized.")
-
-    conn.close()
-
-def get_or_create_user(db_conn, username="default_user"):
+def get_or_create_user(username="default_user"):
     """Get a user by username, or create them if they don't exist."""
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
-    user = cursor.fetchone()
+    user = User.query.filter_by(username=username).first()
     if user:
-        user_id = user['id']
-    else:
-        cursor.execute("INSERT INTO users (username) VALUES (?)", (username,))
-        db_conn.commit()
-        user_id = cursor.lastrowid
-    return user_id
+        return user
 
-def create_chat_session(db_conn, session_id, user_id, title="New Conversation"):
-    """Creates a new chat session."""
-    db_conn.execute(
-        "INSERT OR IGNORE INTO chat_sessions (id, user_id, title) VALUES (?, ?, ?)",
-        (session_id, user_id, title)
-    )
-    db_conn.commit()
+    new_user = User(username=username)
+    db.session.add(new_user)
+    db.session.commit()
+    return new_user
 
-def add_chat_message(db_conn, session_id, role, content):
+def create_chat_session(session_id, user_id, title="New Conversation"):
+    """Creates a new chat session if it doesn't exist."""
+    session = db.session.get(ChatSession, session_id)
+    if not session:
+        new_session = ChatSession(id=session_id, user_id=user_id, title=title)
+        db.session.add(new_session)
+        db.session.commit()
+
+def add_chat_message(session_id, role, content):
     """Adds a message to a chat session's history."""
-    db_conn.execute(
-        "INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)",
-        (session_id, role, content)
-    )
-    db_conn.commit()
+    message = ChatMessage(session_id=session_id, role=role, content=content)
+    db.session.add(message)
+
     # Update session title with the first user message
     if role == 'user':
-        cursor = db_conn.cursor()
-        cursor.execute("SELECT title FROM chat_sessions WHERE id = ?", (session_id,))
-        title = cursor.fetchone()['title']
-        if title == "New Conversation":
-            new_title = content[:50]
-            db_conn.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (new_title, session_id))
-            db_conn.commit()
+        session = ChatSession.query.get(session_id)
+        if session and session.title == "New Conversation":
+            session.title = content[:50]
 
+    db.session.commit()
 
-def get_session_history(db_conn, session_id):
+def get_session_history(session_id):
     """Retrieves the message history for a given session."""
-    cursor = db_conn.cursor()
-    cursor.execute(
-        "SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC",
-        (session_id,)
-    )
-    history = [dict(row) for row in cursor.fetchall()]
-    return history
+    session = db.session.get(ChatSession, session_id)
+    if not session:
+        return []
 
-def get_all_sessions(db_conn, user_id):
+    # Assuming messages are ordered by their primary key `id` which is auto-incrementing
+    messages = sorted(session.messages, key=lambda m: m.created_at)
+    return [{'role': msg.role, 'content': msg.content} for msg in messages]
+
+def get_all_sessions(user_id):
     """Retrieves all sessions for a given user."""
-    cursor = db_conn.cursor()
-    cursor.execute(
-        "SELECT id, title FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC",
-        (user_id,)
-    )
-    sessions = [dict(row) for row in cursor.fetchall()]
-    return sessions
+    user = db.session.get(User, user_id)
+    if not user:
+        return []
+    sessions = sorted(user.sessions, key=lambda s: s.created_at, reverse=True)
+    return [{'id': s.id, 'title': s.title} for s in sessions]
 
-def get_latest_session(db_conn, user_id):
+def get_latest_session(user_id):
     """Retrieves the most recent session for a given user."""
-    cursor = db_conn.cursor()
-    cursor.execute(
-        "SELECT id, title FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-        (user_id,)
-    )
-    session = cursor.fetchone()
+    session = ChatSession.query.filter_by(user_id=user_id).order_by(desc(ChatSession.created_at)).first()
     if session:
-        return dict(session)
+        return {'id': session.id, 'title': session.title}
     return None
 
-def save_fact(db_conn, user_id, fact_key, fact_value):
+def save_fact(user_id, fact_key, fact_value):
     """Saves a fact for a given user, updating if it exists."""
-    db_conn.execute(
-        """
-        INSERT INTO user_facts (user_id, fact_key, fact_value)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id, fact_key) DO UPDATE SET
-        fact_value = excluded.fact_value,
-        created_at = CURRENT_TIMESTAMP
-        """,
-        (user_id, fact_key, fact_value)
-    )
-    db_conn.commit()
+    fact = UserFact.query.filter_by(user_id=user_id, fact_key=fact_key).first()
+    if fact:
+        fact.fact_value = fact_value
+    else:
+        fact = UserFact(user_id=user_id, fact_key=fact_key, fact_value=fact_value)
+        db.session.add(fact)
+    db.session.commit()
     return f"Fact '{fact_key}' saved."
 
-def get_user_facts(db_conn, user_id):
+def get_user_facts(user_id):
     """Retrieves all facts for a given user."""
-    cursor = db_conn.cursor()
-    cursor.execute(
-        "SELECT fact_key, fact_value FROM user_facts WHERE user_id = ? ORDER BY created_at DESC",
-        (user_id,)
-    )
-    facts = [dict(row) for row in cursor.fetchall()]
-    return facts
+    user = db.session.get(User, user_id)
+    if not user:
+        return []
+    facts = sorted(user.facts, key=lambda f: f.created_at, reverse=True)
+    return [{'fact_key': f.fact_key, 'fact_value': f.fact_value} for f in facts]
 
-def delete_session(db_conn, session_id):
+def delete_session(session_id):
     """Deletes a session and all its messages."""
-    cursor = db_conn.cursor()
-    # Use a transaction to ensure both deletes succeed or fail together
-    try:
-        cursor.execute("BEGIN")
-        cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
-        cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
-        cursor.execute("COMMIT")
+    session = db.session.get(ChatSession, session_id)
+    if session:
+        db.session.delete(session)
+        db.session.commit()
         return {"status": "success", "message": "Session deleted."}
-    except Exception as e:
-        cursor.execute("ROLLBACK")
-        raise e
+    return {"status": "error", "message": "Session not found."}
 
-def update_session_title(db_conn, session_id, new_title):
+def update_session_title(session_id, new_title):
     """Updates the title of a chat session."""
-    db_conn.execute(
-        "UPDATE chat_sessions SET title = ? WHERE id = ?",
-        (new_title, session_id)
-    )
-    db_conn.commit()
-    return {"status": "success", "message": "Session title updated."}
+    session = db.session.get(ChatSession, session_id)
+    if session:
+        session.title = new_title
+        db.session.commit()
+        return {"status": "success", "message": "Session title updated."}
+    return {"status": "error", "message": "Session not found."}

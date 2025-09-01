@@ -1,30 +1,24 @@
-from flask import Flask, request, Response, jsonify, g
+from flask import Flask, request, Response, jsonify
 from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
 import requests
 import json
-import sqlite3
 import os
-import backend.database as db
 
 app = Flask(__name__)
 CORS(app)
 
-# --- Database Connection Management ---
-def get_db():
-    """(Temporary diagnostic version) Opens a new database connection every time."""
-    db_path = app.config.get('DATABASE_PATH', db.DB_FILE)
-    db_conn = sqlite3.connect(db_path)
-    db_conn.row_factory = sqlite3.Row
-    return db_conn
+# --- Database Configuration ---
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'ai_assistant.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['DEFAULT_USER_ID'] = 1 # Default user_id, will be set properly on startup
 
-# @app.teardown_appcontext
-def close_db(exception):
-    """(Temporarily disabled) Closes the database again at the end of the request."""
-    database = g.pop('db', None)
-    if database is not None:
-        database.close()
+db_sql_alchemy = SQLAlchemy(app)
 
-# This will be initialized in the main block or test fixture
+# Import models after db is created to avoid circular imports
+from backend.models import User, ChatSession, ChatMessage, UserFact
+import backend.database as db_ops
 
 # --- AI Configuration ---
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
@@ -45,9 +39,9 @@ Your thought process should be:
 Always start by thinking.
 """
 
-def get_tools(db_conn):
+def get_tools():
     return {
-        "save_fact": lambda **kwargs: db.save_fact(db_conn, **kwargs),
+        "save_fact": lambda **kwargs: db_ops.save_fact(**kwargs),
     }
 
 @app.route('/chat', methods=['POST'])
@@ -58,15 +52,13 @@ def chat():
 
     message = data['message']
     session_id = data['session_id']
-    user_id = app.config.get('DEFAULT_USER_ID', 1)
-
-    db_conn = get_db()
+    user_id = app.config.get('DEFAULT_USER_ID')
 
     def generate_and_save():
-        db.create_chat_session(db_conn, session_id, user_id)
-        db.add_chat_message(db_conn, session_id, "user", message)
+        db_ops.create_chat_session(session_id, user_id)
+        db_ops.add_chat_message(session_id, "user", message)
 
-        facts = db.get_user_facts(db_conn, user_id)
+        facts = db_ops.get_user_facts(user_id)
         facts_prompt_section = ""
         if facts:
             facts_list = "\n".join([f"- {fact['fact_key']}: {fact['fact_value']}" for fact in facts])
@@ -74,11 +66,11 @@ def chat():
 
         system_prompt_with_facts = SYSTEM_PROMPT + facts_prompt_section
 
-        history = db.get_session_history(db_conn, session_id)
+        history = db_ops.get_session_history(session_id)
         history.insert(0, {"role": "system", "content": system_prompt_with_facts})
 
         full_assistant_response = ""
-        tools = get_tools(db_conn)
+        tools = get_tools()
 
         try:
             while True:
@@ -113,8 +105,8 @@ def chat():
                         except Exception as e:
                             result_message = f"Error executing tool {tool_name}: {e}"
                         yield json.dumps({"type": "thought", "content": result_message}) + '\n'
-                        db.add_chat_message(db_conn, session_id, "assistant", json.dumps(tool_call_json))
-                        db.add_chat_message(db_conn, session_id, "tool", result_message)
+                        db_ops.add_chat_message(session_id, "assistant", json.dumps(tool_call_json))
+                        db_ops.add_chat_message(session_id, "tool", result_message)
                         history.append({"role": "assistant", "content": json.dumps(tool_call_json)})
                         history.append({"role": "tool", "content": result_message})
                         continue
@@ -125,7 +117,7 @@ def chat():
                     break
 
             if full_assistant_response:
-                db.add_chat_message(db_conn, session_id, "assistant", full_assistant_response)
+                db_ops.add_chat_message(session_id, "assistant", full_assistant_response)
 
         except requests.exceptions.RequestException as e:
             error_message = f"Error connecting to Ollama: {e}"
@@ -136,9 +128,9 @@ def chat():
 
 @app.route('/sessions', methods=['GET'])
 def get_sessions():
-    user_id = app.config.get('DEFAULT_USER_ID', 1)
+    user_id = app.config.get('DEFAULT_USER_ID')
     try:
-        sessions = db.get_all_sessions(get_db(), user_id)
+        sessions = db_ops.get_all_sessions(user_id)
         return jsonify(sessions)
     except Exception as e:
         print(f"Error reading sessions: {e}")
@@ -147,7 +139,7 @@ def get_sessions():
 @app.route('/sessions/<session_id>', methods=['GET'])
 def get_session_history_route(session_id):
     try:
-        history = db.get_session_history(get_db(), session_id)
+        history = db_ops.get_session_history(session_id)
         return jsonify(history)
     except Exception as e:
         print(f"Error reading session {session_id}: {e}")
@@ -156,7 +148,7 @@ def get_session_history_route(session_id):
 @app.route('/sessions/<session_id>', methods=['DELETE'])
 def delete_session_route(session_id):
     try:
-        result = db.delete_session(get_db(), session_id)
+        result = db_ops.delete_session(session_id)
         return jsonify(result)
     except Exception as e:
         print(f"Error deleting session {session_id}: {e}")
@@ -168,7 +160,7 @@ def update_session_title_route(session_id):
     if not data or 'title' not in data:
         return jsonify({"error": "New title not provided"}), 400
     try:
-        result = db.update_session_title(get_db(), session_id, data['title'])
+        result = db_ops.update_session_title(session_id, data['title'])
         return jsonify(result)
     except Exception as e:
         print(f"Error updating session {session_id}: {e}")
@@ -176,9 +168,9 @@ def update_session_title_route(session_id):
 
 @app.route('/sessions/latest/greeting', methods=['GET'])
 def get_latest_session_greeting():
-    user_id = app.config.get('DEFAULT_USER_ID', 1)
+    user_id = app.config.get('DEFAULT_USER_ID')
     try:
-        session = db.get_latest_session(get_db(), user_id)
+        session = db_ops.get_latest_session(user_id)
         if not session:
             return jsonify({"greeting": "Welcome! What can I help you with today?", "session_id": None})
 
@@ -194,6 +186,7 @@ def get_latest_session_greeting():
 
 if __name__ == '__main__':
     with app.app_context():
-        db.init_db()
-        app.config['DEFAULT_USER_ID'] = db.get_or_create_user(get_db(), "default_user")
+        db_ops.init_db()
+        user = db_ops.get_or_create_user("default_user")
+        app.config['DEFAULT_USER_ID'] = user.id
     app.run(host='0.0.0.0', port=5000, debug=True)

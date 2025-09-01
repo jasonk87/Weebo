@@ -3,3 +3,4 @@ requests
 Flask-Cors
 pytest
 pytest-mock
+Flask-SQLAlchemy
