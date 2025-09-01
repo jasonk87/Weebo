@@ -1,9 +1,9 @@
 from flask import Flask, request, Response, jsonify
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
 import requests
 import json
 import os
+from .extensions import db_sql_alchemy
 
 app = Flask(__name__)
 CORS(app)
@@ -14,7 +14,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'ai
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['DEFAULT_USER_ID'] = 1 # Default user_id, will be set properly on startup
 
-db_sql_alchemy = SQLAlchemy(app)
+# Initialize extensions
+db_sql_alchemy.init_app(app)
 
 # Import models after db is created to avoid circular imports
 from .models import User, ChatSession, ChatMessage, UserFact
