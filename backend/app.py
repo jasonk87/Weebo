@@ -68,8 +68,16 @@ def chat():
         db.create_chat_session(db_conn, session_id, user_id)
         db.add_chat_message(db_conn, session_id, "user", message)
 
+        facts = db.get_user_facts(db_conn, user_id)
+        facts_prompt_section = ""
+        if facts:
+            facts_list = "\n".join([f"- {fact['fact_key']}: {fact['fact_value']}" for fact in facts])
+            facts_prompt_section = f"\n\n## Known Facts About The User\nHere is a list of facts you know about the user. Use them to provide a more personalized experience.\n{facts_list}"
+
+        system_prompt_with_facts = SYSTEM_PROMPT + facts_prompt_section
+
         history = db.get_session_history(db_conn, session_id)
-        history.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+        history.insert(0, {"role": "system", "content": system_prompt_with_facts})
 
         full_assistant_response = ""
         tools = get_tools(db_conn)

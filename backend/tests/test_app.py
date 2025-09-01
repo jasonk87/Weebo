@@ -121,3 +121,26 @@ def test_save_fact_tool(client, mocker):
         fact = cursor.fetchone()
         assert fact is not None
         assert fact['fact_value'] == 'London'
+
+def test_chat_with_fact_recall(client, mocker):
+    # 1. Setup: Save a fact directly to the database for the user
+    user_id = client.application.config['DEFAULT_USER_ID']
+    with flask_app.app_context():
+        db.save_fact(get_db(), user_id, 'name', 'John')
+
+    # 2. Mock the API call
+    mock_post = mocker.patch('requests.post')
+    mock_ollama_chunks = [{"type": "answer_chunk", "content": "Hello John!"}]
+    mock_post.return_value = MockResponse(mock_ollama_chunks, 200)
+
+    # 3. Act: Send a message that should trigger the recall
+    client.post('/chat', json={'message': 'Hi, do you know my name?', 'session_id': 'recall-test'})
+
+    # 4. Assert: Check that the prompt sent to Ollama contained the fact
+    mock_post.assert_called_once()
+    call_args, call_kwargs = mock_post.call_args
+    sent_payload = call_kwargs['json']
+    system_prompt = sent_payload['messages'][0]['content']
+
+    assert "## Known Facts About The User" in system_prompt
+    assert "- name: John" in system_prompt

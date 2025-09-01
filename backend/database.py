@@ -150,3 +150,13 @@ def save_fact(db_conn, user_id, fact_key, fact_value):
     )
     db_conn.commit()
     return f"Fact '{fact_key}' saved."
+
+def get_user_facts(db_conn, user_id):
+    """Retrieves all facts for a given user."""
+    cursor = db_conn.cursor()
+    cursor.execute(
+        "SELECT fact_key, fact_value FROM user_facts WHERE user_id = ? ORDER BY created_at DESC",
+        (user_id,)
+    )
+    facts = [dict(row) for row in cursor.fetchall()]
+    return facts
