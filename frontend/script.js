@@ -296,10 +296,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         if (jsonChunk.type === 'thought') {
                             botMessageElement.thoughtsContainer.style.display = 'block';
-                            const thoughtElement = document.createElement('p');
-                            thoughtElement.textContent = jsonChunk.content;
-                            botMessageElement.thoughtsContent.appendChild(thoughtElement);
-                            botMessageElement.thoughtsContent.scrollTop = botMessageElement.thoughtsContent.scrollHeight;
+                            botMessageElement.thoughtsContent.textContent += jsonChunk.content + '\n';
+                            // Auto-scroll the thoughts container
+                            const thoughtsContainer = botMessageElement.querySelector('.thoughts-content');
+                            thoughtsContainer.scrollTop = thoughtsContainer.scrollHeight;
                         } else if (jsonChunk.type === 'answer_chunk') {
                             botMessageElement.fullContent += jsonChunk.content;
                             botMessageElement.answerContainer.innerHTML = marked.parse(botMessageElement.fullContent);
@@ -337,13 +337,15 @@ document.addEventListener('DOMContentLoaded', () => {
             messageElement.innerHTML = `
                 <div class="thoughts-container" style="display: none;">
                     <div class="thoughts-header">Thinking...</div>
-                    <div class="thoughts-content"></div>
+                    <div class="thoughts-content">
+                        <pre><code></code></pre>
+                    </div>
                 </div>
                 <div class="answer-container"></div>
             `;
             messageElement.answerContainer = messageElement.querySelector('.answer-container');
             messageElement.thoughtsContainer = messageElement.querySelector('.thoughts-container');
-            messageElement.thoughtsContent = messageElement.querySelector('.thoughts-content');
+            messageElement.thoughtsContent = messageElement.querySelector('.thoughts-content pre code');
             messageElement.fullContent = '';
         }
         chatBox.appendChild(messageElement);

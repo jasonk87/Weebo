@@ -26,7 +26,6 @@ def close_db(exception):
         database.close()
 
 # This will be initialized in the main block or test fixture
-DEFAULT_USER_ID = 1
 
 # --- AI Configuration ---
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://127.0.0.1:11434/api/chat")
