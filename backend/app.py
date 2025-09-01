@@ -155,6 +155,27 @@ def get_session_history_route(session_id):
         print(f"Error reading session {session_id}: {e}")
         return jsonify({"error": "Could not retrieve session history"}), 500
 
+@app.route('/sessions/<session_id>', methods=['DELETE'])
+def delete_session_route(session_id):
+    try:
+        result = db.delete_session(get_db(), session_id)
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error deleting session {session_id}: {e}")
+        return jsonify({"error": "Could not delete session"}), 500
+
+@app.route('/sessions/<session_id>', methods=['PUT'])
+def update_session_title_route(session_id):
+    data = request.get_json()
+    if not data or 'title' not in data:
+        return jsonify({"error": "New title not provided"}), 400
+    try:
+        result = db.update_session_title(get_db(), session_id, data['title'])
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error updating session {session_id}: {e}")
+        return jsonify({"error": "Could not update session title"}), 500
+
 @app.route('/sessions/latest/greeting', methods=['GET'])
 def get_latest_session_greeting():
     user_id = app.config.get('DEFAULT_USER_ID', 1)

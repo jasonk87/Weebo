@@ -144,3 +144,48 @@ def test_chat_with_fact_recall(client, mocker):
 
     assert "## Known Facts About The User" in system_prompt
     assert "- name: John" in system_prompt
+
+def test_delete_session(client):
+    # 1. Setup: Create a session to delete
+    user_id = client.application.config['DEFAULT_USER_ID']
+    session_id_to_delete = 'delete-me'
+    with flask_app.app_context():
+        conn = get_db()
+        db.create_chat_session(conn, session_id_to_delete, user_id, title="To Be Deleted")
+        db.add_chat_message(conn, session_id_to_delete, 'user', 'A message')
+        # Verify it exists
+        sessions = db.get_all_sessions(conn, user_id)
+        assert any(s['id'] == session_id_to_delete for s in sessions)
+
+    # 2. Act: Call the DELETE endpoint
+    response = client.delete(f'/sessions/{session_id_to_delete}')
+    assert response.status_code == 200
+
+    # 3. Assert: Verify the session and its messages are gone
+    with flask_app.app_context():
+        conn = get_db()
+        sessions = db.get_all_sessions(conn, user_id)
+        assert not any(s['id'] == session_id_to_delete for s in sessions)
+        history = db.get_session_history(conn, session_id_to_delete)
+        assert len(history) == 0
+
+def test_update_session_title(client):
+    # 1. Setup: Create a session to rename
+    user_id = client.application.config['DEFAULT_USER_ID']
+    session_id_to_rename = 'rename-me'
+    with flask_app.app_context():
+        conn = get_db()
+        db.create_chat_session(conn, session_id_to_rename, user_id, title="Old Title")
+
+    # 2. Act: Call the PUT endpoint with the new title
+    new_title = "A Better Title"
+    response = client.put(f'/sessions/{session_id_to_rename}', json={'title': new_title})
+    assert response.status_code == 200
+
+    # 3. Assert: Verify the title was updated
+    with flask_app.app_context():
+        conn = get_db()
+        sessions = db.get_all_sessions(conn, user_id)
+        renamed_session = next((s for s in sessions if s['id'] == session_id_to_rename), None)
+        assert renamed_session is not None
+        assert renamed_session['title'] == new_title

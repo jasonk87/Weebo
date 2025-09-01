@@ -73,6 +73,83 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Session Management ---
+    function handleRename(sessionId, li) {
+        const titleSpan = li.querySelector('.session-title');
+        const currentTitle = titleSpan.textContent;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentTitle;
+        input.className = 'rename-input';
+
+        titleSpan.style.display = 'none';
+        li.prepend(input);
+        input.focus();
+        input.select();
+
+        const finishEditing = async () => {
+            const newTitle = input.value.trim();
+
+            // Revert UI
+            li.removeChild(input);
+            titleSpan.style.display = 'inline';
+
+            if (newTitle && newTitle !== currentTitle) {
+                try {
+                    const response = await fetch(`${BACKEND_BASE_URL}/sessions/${sessionId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title: newTitle }),
+                    });
+                    if (!response.ok) throw new Error('Failed to rename session');
+                    titleSpan.textContent = newTitle; // Optimistic update
+                } catch (error) {
+                    console.error('Error renaming session:', error);
+                    alert('Error: Could not rename session.');
+                    titleSpan.textContent = currentTitle; // Revert on failure
+                }
+            }
+        };
+
+        input.addEventListener('blur', finishEditing);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                input.blur();
+            } else if (e.key === 'Escape') {
+                input.value = currentTitle;
+                input.blur();
+            }
+        });
+    }
+
+    async function handleDelete(sessionId) {
+        const confirmed = confirm("Are you sure you want to delete this conversation?");
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch(`${BACKEND_BASE_URL}/sessions/${sessionId}`, {
+                method: 'DELETE',
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to delete session');
+            }
+
+            if (activeSessionId === sessionId) {
+                activeSessionId = null;
+                chatBox.innerHTML = '';
+                welcomeMessage.classList.remove('hidden');
+                updateActiveSessionInUI();
+            }
+
+            await loadSessions(); // Refresh the list
+        } catch (error) {
+            console.error('Error deleting session:', error);
+            alert(`Error: ${error.message}`);
+        }
+    }
+
     async function loadSessions() {
         try {
             const response = await fetch(`${BACKEND_BASE_URL}/sessions`);
@@ -82,10 +159,37 @@ document.addEventListener('DOMContentLoaded', () => {
             sessionList.innerHTML = '';
             sessions.forEach(session => {
                 const li = document.createElement('li');
-                li.textContent = session.title || 'New Conversation';
                 li.dataset.sessionId = session.id;
                 li.classList.add('session-list-item');
-                li.addEventListener('click', () => switchSession(session.id));
+
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'session-title';
+                titleSpan.textContent = session.title || 'New Conversation';
+                li.appendChild(titleSpan);
+
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'session-actions';
+
+                const renameBtn = document.createElement('button');
+                renameBtn.className = 'rename-btn';
+                renameBtn.textContent = '✏️';
+                renameBtn.addEventListener('click', (e) => { e.stopPropagation(); handleRename(session.id, li); });
+                actionsDiv.appendChild(renameBtn);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-btn';
+                deleteBtn.textContent = '🗑️';
+                deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); handleDelete(session.id); });
+                actionsDiv.appendChild(deleteBtn);
+
+                li.appendChild(actionsDiv);
+
+                li.addEventListener('click', (e) => {
+                    // Don't switch session if an action button was clicked
+                    if (e.target.tagName !== 'BUTTON') {
+                        switchSession(session.id);
+                    }
+                });
                 sessionList.appendChild(li);
             });
             updateActiveSessionInUI();

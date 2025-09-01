@@ -82,14 +82,65 @@ body {
 }
 
 .session-list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 12px 15px;
     border-radius: 8px;
     cursor: pointer;
     margin-bottom: 8px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.session-title {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    flex-grow: 1;
+}
+
+.session-actions {
+    display: flex;
+    align-items: center;
+    opacity: 0; /* Hidden by default */
+    transition: opacity 0.2s ease;
+}
+
+.session-list-item:hover .session-actions {
+    opacity: 1; /* Show on hover */
+}
+
+.session-list-item.active .session-actions {
+    opacity: 1; /* Always show for active item */
+}
+
+
+.session-actions button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    margin-left: 4px;
+    font-size: 16px;
+    line-height: 1;
+    border-radius: 4px;
+}
+
+.session-actions button:hover {
+    background-color: rgba(0,0,0,0.1);
+}
+
+.rename-input {
+    width: 100%;
+    background-color: #fff;
+    border: 1px solid var(--accent-color);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-family: inherit;
+    font-size: 14px;
+    outline: none;
+    flex-grow: 1;
+    margin-right: 10px; /* Give some space from action buttons */
 }
 
 .session-list-item:hover {

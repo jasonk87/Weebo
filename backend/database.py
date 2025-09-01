@@ -160,3 +160,26 @@ def get_user_facts(db_conn, user_id):
     )
     facts = [dict(row) for row in cursor.fetchall()]
     return facts
+
+def delete_session(db_conn, session_id):
+    """Deletes a session and all its messages."""
+    cursor = db_conn.cursor()
+    # Use a transaction to ensure both deletes succeed or fail together
+    try:
+        cursor.execute("BEGIN")
+        cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+        cursor.execute("COMMIT")
+        return {"status": "success", "message": "Session deleted."}
+    except Exception as e:
+        cursor.execute("ROLLBACK")
+        raise e
+
+def update_session_title(db_conn, session_id, new_title):
+    """Updates the title of a chat session."""
+    db_conn.execute(
+        "UPDATE chat_sessions SET title = ? WHERE id = ?",
+        (new_title, session_id)
+    )
+    db_conn.commit()
+    return {"status": "success", "message": "Session title updated."}
