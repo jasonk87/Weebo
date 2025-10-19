@@ -1,6 +1,9 @@
-Flask
-requests
-Flask-Cors
+Quart
+Quart-Cors
+httpx
+SQLAlchemy
+aiosqlite
+Hypercorn
 pytest
+pytest-asyncio
 pytest-mock
-Flask-SQLAlchemy

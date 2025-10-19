@@ -1,12 +1,11 @@
-from flask import Flask, request, Response, jsonify
-from flask_cors import CORS
-import requests
+from quart import Quart, request, Response, jsonify
+from quart_cors import cors
+import httpx
 import json
 import os
-from .extensions import db_sql_alchemy
 
-app = Flask(__name__)
-CORS(app)
+app = Quart(__name__)
+app = cors(app, allow_origin="*")
 
 # --- Database Configuration ---
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -14,8 +13,6 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'ai
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['DEFAULT_USER_ID'] = 1 # Default user_id, will be set properly on startup
 
-# Initialize extensions
-db_sql_alchemy.init_app(app)
 
 # Import models after db is created to avoid circular imports
 from .models import User, ChatSession, ChatMessage, UserFact
@@ -46,8 +43,8 @@ def get_tools():
     }
 
 @app.route('/chat', methods=['POST'])
-def chat():
-    data = request.get_json()
+async def chat():
+    data = await request.get_json()
     if not data or 'message' not in data or 'session_id' not in data:
         return jsonify({"error": "Message or session_id not provided"}), 400
 
@@ -55,11 +52,11 @@ def chat():
     session_id = data['session_id']
     user_id = app.config.get('DEFAULT_USER_ID')
 
-    def generate_and_save():
-        db_ops.create_chat_session(session_id, user_id)
-        db_ops.add_chat_message(session_id, "user", message)
+    async def generate_and_save():
+        await db_ops.create_chat_session(session_id, user_id)
+        await db_ops.add_chat_message(session_id, "user", message)
 
-        facts = db_ops.get_user_facts(user_id)
+        facts = await db_ops.get_user_facts(user_id)
         facts_prompt_section = ""
         if facts:
             facts_list = "\n".join([f"- {fact['fact_key']}: {fact['fact_value']}" for fact in facts])
@@ -67,7 +64,7 @@ def chat():
 
         system_prompt_with_facts = SYSTEM_PROMPT + facts_prompt_section
 
-        history = db_ops.get_session_history(session_id)
+        history = await db_ops.get_session_history(session_id)
         history.insert(0, {"role": "system", "content": system_prompt_with_facts})
 
         full_assistant_response = ""
@@ -76,24 +73,25 @@ def chat():
         try:
             while True:
                 payload = {"model": OLLAMA_MODEL, "messages": history, "stream": True}
-                response = requests.post(OLLAMA_API_URL, json=payload, stream=True)
-                response.raise_for_status()
-                tool_call_json = None
+                async with httpx.AsyncClient() as client:
+                    async with client.stream("POST", OLLAMA_API_URL, json=payload, timeout=None) as response:
+                        response.raise_for_status()
+                        tool_call_json = None
 
-                for line in response.iter_lines():
-                    if line:
-                        try:
-                            chunk_str = line.decode('utf-8')
-                            chunk = json.loads(chunk_str)
-                            if chunk.get("type") == "tool_call":
-                                tool_call_json = chunk
-                                break
-                            yield chunk_str + '\n'
-                            if chunk.get("type") == "answer_chunk":
-                                full_assistant_response += chunk.get("content", "")
-                        except json.JSONDecodeError:
-                            print(f"JSON decode error for line: {line}")
-                            continue
+                        async for line in response.aiter_lines():
+                            if line:
+                                try:
+                                    chunk_str = line
+                                    chunk = json.loads(chunk_str)
+                                    if chunk.get("type") == "tool_call":
+                                        tool_call_json = chunk
+                                        break
+                                    yield chunk_str + '\n'
+                                    if chunk.get("type") == "answer_chunk":
+                                        full_assistant_response += chunk.get("content", "")
+                                except json.JSONDecodeError:
+                                    print(f"JSON decode error for line: {line}")
+                                    continue
 
                 if tool_call_json:
                     tool_name = tool_call_json.get("tool_name")
@@ -101,13 +99,13 @@ def chat():
                     if tool_name in tools:
                         yield json.dumps({"type": "thought", "content": f"Executing tool: {tool_name}({arguments})"}) + '\n'
                         try:
-                            tool_result = tools[tool_name](user_id=user_id, **arguments)
+                            tool_result = await tools[tool_name](user_id=user_id, **arguments)
                             result_message = f"Tool {tool_name} executed successfully. Result: {tool_result}"
                         except Exception as e:
                             result_message = f"Error executing tool {tool_name}: {e}"
                         yield json.dumps({"type": "thought", "content": result_message}) + '\n'
-                        db_ops.add_chat_message(session_id, "assistant", json.dumps(tool_call_json))
-                        db_ops.add_chat_message(session_id, "tool", result_message)
+                        await db_ops.add_chat_message(session_id, "assistant", json.dumps(tool_call_json))
+                        await db_ops.add_chat_message(session_id, "tool", result_message)
                         history.append({"role": "assistant", "content": json.dumps(tool_call_json)})
                         history.append({"role": "tool", "content": result_message})
                         continue
@@ -118,9 +116,9 @@ def chat():
                     break
 
             if full_assistant_response:
-                db_ops.add_chat_message(session_id, "assistant", full_assistant_response)
+                await db_ops.add_chat_message(session_id, "assistant", full_assistant_response)
 
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             error_message = f"Error connecting to Ollama: {e}"
             print(error_message)
             yield json.dumps({"type": "error", "content": error_message}) + '\n'
@@ -128,50 +126,50 @@ def chat():
     return Response(generate_and_save(), mimetype='application/x-ndjson')
 
 @app.route('/sessions', methods=['GET'])
-def get_sessions():
+async def get_sessions():
     user_id = app.config.get('DEFAULT_USER_ID')
     try:
-        sessions = db_ops.get_all_sessions(user_id)
+        sessions = await db_ops.get_all_sessions(user_id)
         return jsonify(sessions)
     except Exception as e:
         print(f"Error reading sessions: {e}")
         return jsonify({"error": "Could not retrieve sessions"}), 500
 
 @app.route('/sessions/<session_id>', methods=['GET'])
-def get_session_history_route(session_id):
+async def get_session_history_route(session_id):
     try:
-        history = db_ops.get_session_history(session_id)
+        history = await db_ops.get_session_history(session_id)
         return jsonify(history)
     except Exception as e:
         print(f"Error reading session {session_id}: {e}")
         return jsonify({"error": "Could not retrieve session history"}), 500
 
 @app.route('/sessions/<session_id>', methods=['DELETE'])
-def delete_session_route(session_id):
+async def delete_session_route(session_id):
     try:
-        result = db_ops.delete_session(session_id)
+        result = await db_ops.delete_session(session_id)
         return jsonify(result)
     except Exception as e:
         print(f"Error deleting session {session_id}: {e}")
         return jsonify({"error": "Could not delete session"}), 500
 
 @app.route('/sessions/<session_id>', methods=['PUT'])
-def update_session_title_route(session_id):
-    data = request.get_json()
+async def update_session_title_route(session_id):
+    data = await request.get_json()
     if not data or 'title' not in data:
         return jsonify({"error": "New title not provided"}), 400
     try:
-        result = db_ops.update_session_title(session_id, data['title'])
+        result = await db_ops.update_session_title(session_id, data['title'])
         return jsonify(result)
     except Exception as e:
         print(f"Error updating session {session_id}: {e}")
         return jsonify({"error": "Could not update session title"}), 500
 
 @app.route('/sessions/latest/greeting', methods=['GET'])
-def get_latest_session_greeting():
+async def get_latest_session_greeting():
     user_id = app.config.get('DEFAULT_USER_ID')
     try:
-        session = db_ops.get_latest_session(user_id)
+        session = await db_ops.get_latest_session(user_id)
         if not session:
             return jsonify({"greeting": "Welcome! What can I help you with today?", "session_id": None})
 
@@ -186,8 +184,12 @@ def get_latest_session_greeting():
         return jsonify({"greeting": "Welcome back! It's great to see you.", "session_id": None})
 
 if __name__ == '__main__':
-    with app.app_context():
-        db_ops.init_db()
-        user = db_ops.get_or_create_user("default_user")
-        app.config['DEFAULT_USER_ID'] = user.id
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    async def run():
+        async with app.app_context():
+            await db_ops.init_db()
+            user = await db_ops.get_or_create_user("default_user")
+            app.config['DEFAULT_USER_ID'] = user.id
+        app.run(host='0.0.0.0', port=5000, debug=True)
+
+    import asyncio
+    asyncio.run(run())
